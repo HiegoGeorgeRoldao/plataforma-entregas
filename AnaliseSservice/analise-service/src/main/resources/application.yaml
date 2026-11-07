@@ -1,0 +1,33 @@
+spring:
+  config:
+    import: classpath:kafka-defaults.yaml
+  application:
+    name: analise-service
+  mongodb:
+    uri: ${MONGODB_URI:mongodb://localhost:27017/analises?replicaSet=rs0&directConnection=true}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+      connect-timeout: 2s
+  threads:
+    virtual:
+      enabled: true
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+app:
+  messaging:
+    enabled: ${MESSAGING_ENABLED:true}
+  outbox:
+    enabled: ${OUTBOX_ENABLED:true}
+  usuario-local-id: ${USUARIO_LOCAL_ID:11111111-1111-1111-1111-111111111111}
+  integrations:
+    viacep-url: ${VIACEP_URL:https://viacep.com.br}
+    cptec-url: ${CPTEC_URL:https://servicos.cptec.inpe.br/XML}
