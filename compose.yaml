@@ -1,0 +1,181 @@
+name: plataforma-entregas
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: entregas
+      POSTGRES_USER: entregas
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-entregas_local}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - entregas-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U entregas -d entregas"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres-notificacao:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: notificacoes
+      POSTGRES_USER: notificacoes
+      POSTGRES_PASSWORD: ${NOTIFICACAO_DB_PASSWORD:-notificacoes_local}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - notificacoes-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notificacoes -d notificacoes"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongo:
+    image: mongo:8.0.16
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - analises-mongo:/data/db
+    healthcheck:
+      # Replica set de um no, apenas para desenvolvimento local.
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - |
+          try {
+            rs.status();
+          } catch (error) {
+            if (error.codeName !== 'NotYetInitialized') throw error;
+            rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo:27017'}]});
+          }
+          if (!db.hello().isWritablePrimary) quit(1);
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  redis:
+    image: redis:7.4.6-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - cache-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  kafka-data-init:
+    image: apache/kafka:4.1.0
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /kafka-data"]
+    volumes:
+      - eventos-kafka:/kafka-data
+
+  kafka:
+    image: apache/kafka:4.1.0
+    depends_on:
+      kafka-data-init: {condition: service_completed_successfully}
+    ports:
+      - "127.0.0.1:9092:9092"
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - eventos-kafka:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
+    ports:
+      - "127.0.0.1:${KAFKA_UI_PORT:-8085}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: entregas-mvp
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+      KAFKA_CLUSTERS_0_READONLY: "true"
+      JAVA_TOOL_OPTIONS: -Xmx256m
+    depends_on:
+      kafka: {condition: service_healthy}
+
+  entrega-service:
+    profiles: [apps]
+    build:
+      context: ./EntregaServico/entrega-service
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/entregas
+      DB_PASSWORD: ${DB_PASSWORD:-entregas_local}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      REDIS_HOST: redis
+      DAILY_LIMIT: ${DAILY_LIMIT:-20}
+      JAVA_TOOL_OPTIONS: -Xmx256m
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  analise-service:
+    profiles: [apps]
+    build:
+      context: ./AnaliseSservice/analise-service
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/analises?replicaSet=rs0&directConnection=true
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      REDIS_HOST: redis
+      JAVA_TOOL_OPTIONS: -Xmx256m
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      mongo: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  notificacao-service:
+    profiles: [apps]
+    build:
+      context: ./NotificacaoService/notificacao-service
+    environment:
+      DB_URL: jdbc:postgresql://postgres-notificacao:5432/notificacoes
+      DB_PASSWORD: ${NOTIFICACAO_DB_PASSWORD:-notificacoes_local}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      JAVA_TOOL_OPTIONS: -Xmx256m
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      postgres-notificacao: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+
+volumes:
+  entregas-postgres:
+  notificacoes-postgres:
+  analises-mongo:
+  cache-redis:
+  eventos-kafka:
