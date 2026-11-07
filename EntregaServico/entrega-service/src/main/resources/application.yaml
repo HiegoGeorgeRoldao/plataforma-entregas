@@ -1,0 +1,55 @@
+spring:
+  config:
+    import: classpath:kafka-defaults.yaml
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+      connect-timeout: 2s
+  application:
+    name: entrega-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/entregas}
+    username: ${DB_USER:entregas}
+    password: ${DB_PASSWORD:entregas_local}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# Identidade fixa para o MVP local; substituir por identidade autenticada.
+app:
+  messaging:
+    enabled: ${MESSAGING_ENABLED:true}
+  outbox:
+    enabled: ${OUTBOX_ENABLED:true}
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    limit-per-day: ${DAILY_LIMIT:20}
+  usuario-local-id: ${USUARIO_LOCAL_ID:11111111-1111-1111-1111-111111111111}
