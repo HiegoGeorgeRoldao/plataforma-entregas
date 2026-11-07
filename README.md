@@ -102,13 +102,32 @@ healthcheck embutido no `compose.yaml`.
 
 ## Exercitar o fluxo
 
-No PowerShell:
+No Postman, use **Import > Raw text** e cole um comando cURL por vez.
 
-```powershell
-$entrega = Invoke-RestMethod -Method Post -Uri 'http://localhost:8080/entregas' -ContentType 'application/json' -Body '{"cepOrigem":"01001000","cepDestino":"20040002"}'
-Invoke-RestMethod "http://localhost:8080/entregas/$($entrega.id)"
-Invoke-RestMethod "http://localhost:8081/analises/$($entrega.id)"
-Invoke-RestMethod "http://localhost:8082/notificacoes?entregaId=$($entrega.id)"
+### 1. Solicitar uma entrega
+
+```bash
+curl --request POST --url 'http://localhost:8080/entregas' --header 'Content-Type: application/json' --data '{"cepOrigem":"01001000","cepDestino":"20040002"}'
+```
+
+Copie o campo `id` da resposta e crie no Postman uma variável de coleção ou de ambiente chamada `entregaId`, com esse valor. Se usar uma variável de ambiente, selecione o ambiente antes de enviar as consultas.
+
+### 2. Consultar a entrega
+
+```bash
+curl --globoff --request GET --url 'http://localhost:8080/entregas/{{entregaId}}'
+```
+
+### 3. Consultar a análise
+
+```bash
+curl --globoff --request GET --url 'http://localhost:8081/analises/{{entregaId}}'
+```
+
+### 4. Consultar as notificações da entrega
+
+```bash
+curl --globoff --request GET --url 'http://localhost:8082/notificacoes?entregaId={{entregaId}}'
 ```
 
 A análise é assíncrona; a consulta pode retornar `404` até o processamento
